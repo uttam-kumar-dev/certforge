@@ -4,7 +4,7 @@
 
 ## Quick Start
 
-**Docker:** `docker-compose up -d` then visit http://localhost:3000 (see [DOCKER_SETUP.md](DOCKER_SETUP.md) for details)
+**Docker:** `docker-compose up -d` then visit http://localhost:3000
 
 **Manual:**
 - Backend: `cd backend && pip install -r requirements.txt && uvicorn main:app --reload`
