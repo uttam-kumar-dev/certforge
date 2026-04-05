@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Plus, Save, ArrowLeft, Trash2, Type, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api/client'
+import FontPicker from '../components/FontPicker'
 
 const FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72]
 
@@ -27,6 +28,7 @@ function makeField() {
     font_size: 28,
     font_bold: false,
     font_italic: false,
+    font_weight: 400,
     color: '#ffffff',
     alignment: 'center',
   }
@@ -41,7 +43,6 @@ export default function TemplateEditor() {
   const [selected,    setSelected]    = useState(null)
   const [saving,      setSaving]      = useState(false)
   const [showPreview, setShowPreview] = useState(true)
-  const [fontList,    setFontList]    = useState(['Helvetica'])
   const [activeOp,    setActiveOp]    = useState(null) // null | 'move' | 'resize'
 
   const canvasRef = useRef()
@@ -358,12 +359,13 @@ export default function TemplateEditor() {
                 />
               </PropRow>
 
-              <PropRow label={`Font Family · ${fontList.length} available`}>
-                <select className="input" style={{ fontSize: 13 }}
+              <PropRow label={`Font Family`}>
+                <FontPicker
                   value={selectedField.font_family}
-                  onChange={e => updateField(selectedField.id, { font_family: e.target.value })}>
-                  {fontList.map(f => <option key={f} value={f}>{f}</option>)}
-                </select>
+                  weight={selectedField.font_weight || 400}
+                  onChange={val => updateField(selectedField.id, { font_family: val })}
+                  onWeightChange={w => updateField(selectedField.id, { font_weight: w, font_bold: w >= 600 })}
+                />
               </PropRow>
 
               <PropRow label="Font Size (pt)">

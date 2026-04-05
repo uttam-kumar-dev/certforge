@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import TemplateEditor from './pages/TemplateEditor'
 import GeneratePage from './pages/GeneratePage'
 import JobsPage from './pages/JobsPage'
+import FontManager from './pages/FontManager'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="templates/:id/edit" element={<TemplateEditor />} />
             <Route path="generate" element={<GeneratePage />} />
             <Route path="jobs" element={<JobsPage />} />
+            <Route path="fonts" element={<FontManager />} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

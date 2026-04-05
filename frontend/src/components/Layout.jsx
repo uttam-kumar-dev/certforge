@@ -1,11 +1,12 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Award, LayoutTemplate, Zap, Clock, LogOut, ChevronRight } from 'lucide-react'
+import { Award, LayoutTemplate, Zap, Clock, LogOut, Type } from 'lucide-react'
 
 const nav = [
-  { to: '/', label: 'Templates', icon: LayoutTemplate, exact: true },
-  { to: '/generate', label: 'Generate', icon: Zap },
-  { to: '/jobs', label: 'Jobs', icon: Clock },
+  { to: '/',        label: 'Templates', icon: LayoutTemplate, exact: true },
+  { to: '/generate',label: 'Generate',  icon: Zap },
+  { to: '/jobs',    label: 'Jobs',       icon: Clock },
+  { to: '/fonts',   label: 'My Fonts',  icon: Type },
 ]
 
 export default function Layout() {
