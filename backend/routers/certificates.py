@@ -18,15 +18,9 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.colors import HexColor
 from database import DB_PATH
 from auth_utils import get_current_user
+from fonts import get_reportlab_font
 
 router = APIRouter()
-
-FONT_MAP = {
-    "Helvetica": "Helvetica",
-    "Times-Roman": "Times-Roman",
-    "Courier": "Courier",
-    "Helvetica-Bold": "Helvetica-Bold",
-}
 
 def draw_text_field(c_obj, field, value, img_w_px, img_h_px, page_w_pt, page_h_pt):
     """Draw text field on PDF canvas, scaling from pixel coords to points."""
@@ -50,35 +44,8 @@ def draw_text_field(c_obj, field, value, img_w_px, img_h_px, page_w_pt, page_h_p
     color = field.get("color", "#000000")
     alignment = field.get("alignment", "center")
 
-    # Select font
-    font_name = "Helvetica"
-    if font_family in ("Helvetica", "Arial", "Sans-Serif"):
-        if bold and italic:
-            font_name = "Helvetica-BoldOblique"
-        elif bold:
-            font_name = "Helvetica-Bold"
-        elif italic:
-            font_name = "Helvetica-Oblique"
-        else:
-            font_name = "Helvetica"
-    elif font_family in ("Times New Roman", "Times", "Serif"):
-        if bold and italic:
-            font_name = "Times-BoldItalic"
-        elif bold:
-            font_name = "Times-Bold"
-        elif italic:
-            font_name = "Times-Italic"
-        else:
-            font_name = "Times-Roman"
-    elif font_family in ("Courier", "Monospace"):
-        if bold and italic:
-            font_name = "Courier-BoldOblique"
-        elif bold:
-            font_name = "Courier-Bold"
-        elif italic:
-            font_name = "Courier-Oblique"
-        else:
-            font_name = "Courier"
+    # Resolve font via registry (fonts.py)
+    font_name = get_reportlab_font(font_family, bold=bold, italic=italic)
 
     try:
         hex_color = color.lstrip("#")
