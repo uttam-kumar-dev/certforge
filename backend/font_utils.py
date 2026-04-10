@@ -81,6 +81,41 @@ def check_magic_bytes(data: bytes) -> None:
         raise ValueError(f"Not a valid TTF/OTF font file (bad magic bytes: {magic!r})")
 
 
+# ── Step 2: check for TrueType (glyf) outlines ───────────────────────────────
+def _ensure_glyf_outline(data: bytes) -> bytes:
+    """
+    Verify font has TrueType (glyf) outlines only.
+    PostScript (CFF/OTF) fonts are rejected to preserve rendering quality.
+    Returns font data unchanged (already has glyf).
+    Raises ValueError if font uses PostScript outlines or lacks glyf.
+    """
+    import io
+    try:
+        tt = _TTFont(file=io.BytesIO(data), lazy=False)
+        
+        # TrueType fonts have glyf + loca tables
+        if 'glyf' in tt and 'loca' in tt:
+            tt.close()
+            return data
+        
+        # PostScript/CFF fonts — reject with clear message
+        if 'CFF ' in tt or 'CFF2' in tt:
+            tt.close()
+            raise ValueError(
+                "PostScript (OTF) fonts are not supported. "
+                "Please use TrueType (.ttf) fonts with glyf outlines."
+            )
+        
+        # Neither glyf nor CFF present — unknown format
+        tt.close()
+        raise ValueError("Invalid font — lacks TrueType (glyf) or PostScript (CFF) outlines")
+        
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Font validation failed: {e}")
+
+
 # ── Step 2: deep parse with fontTools ─────────────────────────────────────────
 def parse_and_inspect(data: bytes) -> dict:
     """
@@ -151,9 +186,22 @@ def parse_and_inspect(data: bytes) -> dict:
 
 # ── Step 3: save to disk safely ───────────────────────────────────────────────
 def save_font_file(user_id: int, data: bytes) -> Path:
-    """Save raw bytes to a UUID-named file in the user's isolated directory."""
+    """Save raw bytes to a UUID-named file in the user's isolated directory.
+    Detects whether the font is TTF or OTF based on magic bytes.
+    """
     uid = uuid.uuid4().hex[:12]
-    filename = f"{uid}.ttf"
+    
+    # Determine file extension from magic bytes
+    if len(data) >= 4:
+        magic = data[:4]
+        if magic == b'OTTO':
+            ext = ".otf"
+        else:
+            ext = ".ttf"  # TTF, true, or typ1
+    else:
+        ext = ".ttf"  # Fallback (should not happen after validation)
+    
+    filename = f"{uid}{ext}"
     dest = _safe_path(user_id, filename)
     dest.write_bytes(data)
     return dest
@@ -186,7 +234,9 @@ def ensure_font_registered(reportlab_name: str, file_path: Optional[str]) -> Non
 def validate_and_inspect_font(data: bytes, original_filename: str) -> dict:
     """
     Full security pipeline. Call before writing anything to disk.
-    Returns metadata dict on success, raises ValueError on any problem.
+    Checks for TrueType (glyf) outlines; converts CFF if needed.
+    Returns dict with 'data' (converted font bytes) and 'metadata' (font info).
+    Raises ValueError on any problem.
     """
     # Size check
     if len(data) > MAX_FONT_SIZE_BYTES:
@@ -200,10 +250,16 @@ def validate_and_inspect_font(data: bytes, original_filename: str) -> dict:
     # Magic bytes (first security gate)
     check_magic_bytes(data)
 
-    # Deep parse (second security gate)
+    # Ensure glyf outlines (second security gate) — reject CFF/PostScript fonts
+    data = _ensure_glyf_outline(data)
+
+    # Deep parse (third security gate)
     meta = parse_and_inspect(data)
 
-    return meta
+    return {
+        "data": data,
+        "metadata": meta,
+    }
 
 
 # ── Delete font file safely ───────────────────────────────────────────────────

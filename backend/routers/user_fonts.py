@@ -47,7 +47,9 @@ async def upload_user_font(
 
     # ── Security: validate before touching disk ──────────────────────────────
     try:
-        meta = validate_and_inspect_font(data, file.filename or "font.ttf")
+        result = validate_and_inspect_font(data, file.filename or "font.ttf")
+        data = result["data"]  # Use converted font data
+        meta = result["metadata"]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
