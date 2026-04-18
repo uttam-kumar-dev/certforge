@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Body
+from fastapi.responses import FileResponse, JSONResponse
 import aiosqlite
 import aiofiles
 import json
@@ -7,8 +7,10 @@ import os
 import uuid
 import csv
 import zipfile
+import io
+import base64
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from database import DB_PATH
@@ -94,6 +96,46 @@ def draw_text_field(c_obj, field, value, page_w_pt, page_h_pt, user_font_map):
         c_obj.drawString(x_pt, text_y, text)
 
 
+def draw_text_field_pil(draw, field, value, img_w_px, img_h_px):
+    """Draw a single text field onto a PIL Image."""
+    x_px      = (field["x"]      / 100.0) * img_w_px
+    field_w   = (field["width"]  / 100.0) * img_w_px
+    field_top = (field["y"]      / 100.0) * img_h_px
+    field_h   = (field["height"] / 100.0) * img_h_px
+    y_px      = field_top
+
+    font_size = field.get("font_size", 24)
+    color     = field.get("color",     "#000000")
+    alignment = field.get("alignment", "center")
+
+    text = str(value)
+
+    # Approximate font size scaling for PIL (ReportLab pts vs PIL px)
+    pil_font_size = int(font_size * 1.33)
+
+    try:
+        hx = color.lstrip("#")
+        rgb = tuple(int(hx[i:i+2], 16) for i in (0, 2, 4))
+    except Exception:
+        rgb = (0, 0, 0)
+
+    # Calculate text position and anchor based on alignment
+    text_x = x_px + field_w / 2
+    text_y = y_px + field_h / 2
+    anchor_map = {
+        "center": "mm",
+        "right": "rm",
+        "left": "lm",
+    }
+    anchor = anchor_map.get(alignment, "mm")
+
+    try:
+        draw.text((text_x, text_y), text, fill=rgb, anchor=anchor, font=None)
+    except Exception:
+        # Fallback if font rendering fails
+        draw.text((text_x, text_y), text, fill=rgb, anchor=anchor)
+
+
 def generate_single_certificate(template_data, row_data, output_path, user_font_map=None):
     """Generate one certificate PDF. user_font_map injected for per-user fonts."""
     if user_font_map is None:
@@ -125,10 +167,43 @@ def generate_single_certificate(template_data, row_data, output_path, user_font_
 
     for field in fields:
         variable = field.get("variable", "")
-        value    = row_data.get(variable, variable)
+        value    = row_data.get(variable, False)
+        if value == '':
+            continue
         draw_text_field(c_obj, field, value, page_w_pt, page_h_pt, user_font_map)
 
     c_obj.save()
+
+
+def generate_preview_image(template_data, row_data, user_font_map=None):
+    """Generate a preview image (PNG) with rendered fields. Returns base64-encoded PNG."""
+    if user_font_map is None:
+        user_font_map = {}
+
+    fields     = template_data["fields"]
+    image_path = template_data["image_path"]
+
+    # Open base image
+    img = Image.open(image_path).convert("RGB")
+    img_w_px, img_h_px = img.size
+
+    # Create drawable
+    draw = ImageDraw.Draw(img)
+
+    # Draw each field
+    for field in fields:
+        variable = field.get("variable", "")
+        value    = row_data.get(variable, False)
+        if value == '':
+            continue
+        draw_text_field_pil(draw, field, value, img_w_px, img_h_px)
+
+    # Convert to base64 PNG
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return b64
 
 
 async def load_user_font_map(user_id: int) -> dict:
@@ -184,6 +259,7 @@ async def process_certificate_job(job_id: int, template_data: dict, csv_path: st
                 safe_name = "".join(
                     c for c in str(first_val) if c.isalnum() or c in (' ', '-', '_')
                 ).strip()
+                safe_name = f'{i+1}_{safe_name}'
                 out_path = os.path.join(output_dir, f"{safe_name or f'cert_{i+1}'}.pdf")
                 generate_single_certificate(template_data, row, out_path, user_font_map)
                 generated.append(out_path)
@@ -338,7 +414,7 @@ async def download_single(job_id: int, filename: str, current_user=Depends(get_c
 @router.post("/preview/{template_id}")
 async def preview_certificate(
     template_id: int,
-    sample_data: dict,
+    sample_data: dict = Body(...),
     current_user=Depends(get_current_user),
 ):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -358,6 +434,30 @@ async def preview_certificate(
     out_path = f"uploads/previews/preview_{template_id}_{current_user['id']}.pdf"
     generate_single_certificate(template_data, sample_data, out_path, user_font_map)
     return FileResponse(out_path, media_type="application/pdf", filename="preview.pdf")
+
+
+@router.post("/preview/{template_id}/image")
+async def preview_certificate_image(
+    template_id: int,
+    sample_data: dict = Body(...),
+    current_user=Depends(get_current_user),
+):
+    """Generate a rendered preview image (PNG) of the certificate."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM certificate_templates WHERE id=? AND user_id=?",
+            (template_id, current_user["id"])
+        ) as c:
+            row = await c.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Template not found")
+            template_data = dict(row)
+            template_data["fields"] = json.loads(template_data["fields"])
+
+    user_font_map = await load_user_font_map(current_user["id"])
+    b64_image = generate_preview_image(template_data, sample_data, user_font_map)
+    return JSONResponse({"image": f"data:image/png;base64,{b64_image}"})
 
 
 @router.get("/stats")

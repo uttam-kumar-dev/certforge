@@ -1,23 +1,48 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Eye } from 'lucide-react'
-
-const FONT_FAMILY_CSS = {
-  'Helvetica': 'Helvetica, Arial, sans-serif',
-  'Arial': 'Arial, sans-serif',
-  'Times New Roman': "'Times New Roman', Times, serif",
-  'Courier': "'Courier New', Courier, monospace",
-  'Serif': 'Georgia, serif',
-  'Sans-Serif': 'Arial, sans-serif',
-}
+import api from '../api/client'
 
 /**
- * Renders a live HTML preview of a certificate with filled-in sample data.
+ * Renders a PDF preview of a certificate (from server).
  * Props:
- *   template  – template object with image_path, fields, orientation
+ *   template  – template object with image_path, fields, orientation, id
  *   sampleRow – object { variable: value } for substitution
  *   onClose   – close handler
  */
 export default function CertPreviewModal({ template, sampleRow, onClose }) {
+  const [pdfUrl, setPdfUrl] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    if (!template) return
+
+    const loadPreview = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const response = await api.post(`/certificates/preview/${template.id}`, sampleRow, {
+          responseType: 'blob',
+        })
+        const blob = new Blob([response.data], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        setPdfUrl(url)
+      } catch (err) {
+        console.error('Failed to load preview:', err)
+        setError('Failed to generate preview')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadPreview()
+
+    // Cleanup blob URL on unmount
+    return () => {
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
+    }
+  }, [template, sampleRow])
+
   if (!template) return null
 
   return (
@@ -32,8 +57,10 @@ export default function CertPreviewModal({ template, sampleRow, onClose }) {
       <div style={{
         background: 'var(--surface)', borderRadius: 14,
         border: '1px solid var(--border)', padding: 24,
+        width:'50vw', height: '50vw',
         maxWidth: '90vw', maxHeight: '90vh',
         display: 'flex', flexDirection: 'column', gap: 16,
+        overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -48,59 +75,46 @@ export default function CertPreviewModal({ template, sampleRow, onClose }) {
           </button>
         </div>
 
-        {/* Preview canvas */}
+        {/* PDF Preview */}
         <div style={{
-          position: 'relative', display: 'inline-block',
-          maxWidth: '80vw', maxHeight: '70vh', overflow: 'hidden',
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
           borderRadius: 8, border: '1px solid var(--border)',
+          overflow: 'hidden',
+          background: 'var(--bg1)',
         }}>
-          <img
-            src={`/${template.image_path}`}
-            alt="certificate"
-            style={{
-              display: 'block',
-              maxWidth: '80vw',
-              maxHeight: '70vh',
-              objectFit: 'contain',
-            }}
-          />
-          {/* Overlay fields */}
-          {(template.fields || []).map(f => {
-            const value = sampleRow?.[f.variable] ?? `{${f.variable}}`
-            const fontFamily = FONT_FAMILY_CSS[f.font_family] || 'Helvetica, sans-serif'
-            const alignMap = { left: 'flex-start', center: 'center', right: 'flex-end' }
-            const textAlign = f.alignment || 'center'
-            return (
-              <div key={f.id} style={{
-                position: 'absolute',
-                left: `${f.x}%`, top: `${f.y}%`,
-                width: `${f.width}%`, height: `${f.height}%`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: alignMap[textAlign] || 'center',
-                overflow: 'hidden',
-                pointerEvents: 'none',
-              }}>
-                <span style={{
-                  fontFamily,
-                  fontSize: `clamp(8px, ${f.font_size * 0.55}px, 60px)`,
-                  fontWeight: f.font_bold ? 'bold' : 'normal',
-                  fontStyle: f.font_italic ? 'italic' : 'normal',
-                  color: f.color || '#000000',
-                  textAlign,
-                  whiteSpace: 'nowrap',
-                  padding: '0 4px',
-                  textShadow: '0 1px 2px rgba(0,0,0,0.3)',
-                }}>
-                  {value}
-                </span>
-              </div>
-            )
-          })}
+          {loading ? (
+            <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+              <div className="spinner" style={{ width: 40, height: 40 }} />
+              <span style={{ fontSize: 13, color: 'var(--text3)' }}>Generating preview...</span>
+            </div>
+          ) : error ? (
+            <div style={{ padding: 40, color: 'var(--text3)', fontSize: 13, textAlign: 'center' }}>
+              {error}
+            </div>
+          ) : pdfUrl ? (
+            <iframe
+              src={pdfUrl+'#toolbar=0&scrollbar=0&view=Fit'}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                borderRadius: 8,
+                display: 'block',
+              }}
+              title="Certificate Preview"
+              scrolling="no"
+              frameBorder="0"
+              allowFullScreen={true}
+            />
+          ) : (
+            <div style={{ padding: 40, color: 'var(--text3)', fontSize: 13 }}>
+              No preview available
+            </div>
+          )}
         </div>
 
         <div style={{ fontSize: 12, color: 'var(--text3)', textAlign: 'center' }}>
-          This is an approximate browser preview. The generated PDF may differ slightly in font rendering.
+          This is the actual PDF that will be generated.
         </div>
       </div>
     </div>

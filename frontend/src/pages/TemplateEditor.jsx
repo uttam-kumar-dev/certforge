@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Plus, Save, ArrowLeft, Trash2, Type, Eye, EyeOff } from 'lucide-react'
+import { Plus, Save, ArrowLeft, Trash2, Type, Eye, EyeOff, Eye as EyeIcon } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import FontPicker from '../components/FontPicker'
+import CertPreviewModal from '../components/CertPreviewModal'
 
 const FONT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72]
 
@@ -38,12 +39,15 @@ export default function TemplateEditor() {
   const { id }     = useParams()
   const navigate   = useNavigate()
 
-  const [template,    setTemplate]    = useState(null)
-  const [fields,      setFields]      = useState([])
-  const [selected,    setSelected]    = useState(null)
-  const [saving,      setSaving]      = useState(false)
-  const [showPreview, setShowPreview] = useState(true)
-  const [activeOp,    setActiveOp]    = useState(null) // null | 'move' | 'resize'
+  const [template,         setTemplate]         = useState(null)
+  const [fields,           setFields]           = useState([])
+  const [selected,         setSelected]         = useState(null)
+  const [saving,           setSaving]           = useState(false)
+  const [showPreview,      setShowPreview]      = useState(true)
+  const [activeOp,         setActiveOp]         = useState(null) // null | 'move' | 'resize'
+  const [showFormModal,    setShowFormModal]    = useState(false) // Show form to fill sample data
+  const [showCertModal,    setShowCertModal]    = useState(false) // Show certificate preview
+  const [sampleData,       setSampleData]       = useState({})
 
   const canvasRef = useRef()
   // dragRef stores everything needed for the drag/resize operation
@@ -127,6 +131,71 @@ export default function TemplateEditor() {
     }
   }, []) // empty — uses functional setFields, no stale state
 
+  // ── Arrow key navigation for selected field ────────────────────
+  useEffect(() => {
+    const onKeyDown = e => {
+      if (!selected) return
+
+      const STEP = .33 // percentage step per key press
+
+      switch (e.key) {
+        case 'ArrowUp':
+          e.preventDefault()
+          setFields(fs => {
+            const f = fs.find(f => f.id === selected)
+            if (!f) return fs
+            return fs.map(field =>
+              field.id === selected
+                ? { ...field, y: Math.max(0, field.y - STEP) }
+                : field
+            )
+          })
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          setFields(fs => {
+            const f = fs.find(f => f.id === selected)
+            if (!f) return fs
+            return fs.map(field =>
+              field.id === selected
+                ? { ...field, y: Math.min(100 - field.height, field.y + STEP) }
+                : field
+            )
+          })
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          setFields(fs => {
+            const f = fs.find(f => f.id === selected)
+            if (!f) return fs
+            return fs.map(field =>
+              field.id === selected
+                ? { ...field, x: Math.max(0, field.x - STEP) }
+                : field
+            )
+          })
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          setFields(fs => {
+            const f = fs.find(f => f.id === selected)
+            if (!f) return fs
+            return fs.map(field =>
+              field.id === selected
+                ? { ...field, x: Math.min(100 - field.width, field.x + STEP) }
+                : field
+            )
+          })
+          break
+        default:
+          return
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selected]) // depends on selected
+
   // ── Helpers ────────────────────────────────────────────────────
   const selectedField = fields.find(f => f.id === selected)
 
@@ -174,6 +243,44 @@ export default function TemplateEditor() {
     setActiveOp('resize')
   }
 
+  // ── Certificate Preview Logic ──────────────────────────────────
+  const getStorageKey = () => `cert-preview-${id}`
+  
+  const loadSampleDataFromStorage = () => {
+    const stored = localStorage.getItem(getStorageKey())
+    return stored ? JSON.parse(stored) : null
+  }
+
+  const saveSampleDataToStorage = (data) => {
+    localStorage.setItem(getStorageKey(), JSON.stringify(data))
+  }
+
+  const getDefaultFormData = () => {
+    const storedData = loadSampleDataFromStorage()
+    if (storedData) return storedData
+    
+    const data = {}
+    fields.forEach(f => {
+      data[f.variable] = `Sample ${f.variable}`
+    })
+    return data
+  }
+
+  const handleOpenCertificatePreview = () => {
+    setShowFormModal(true)
+  }
+
+  const handleSaveSampleData = (data) => {
+    saveSampleDataToStorage(data)
+    setSampleData(data)
+    setShowFormModal(false)
+  }
+
+  const handlePreviewCertificate = (data) => {
+    setSampleData(data)
+    setShowCertModal(true)
+  }
+
   // ── Render ─────────────────────────────────────────────────────
   if (!template) return (
     <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}>
@@ -204,6 +311,14 @@ export default function TemplateEditor() {
         </button>
         <button className="btn btn-secondary" onClick={addField}>
           <Plus size={14} /> Add Field
+        </button>
+        <button 
+          className="btn btn-secondary" 
+          onClick={handleOpenCertificatePreview}
+          disabled={fields.length === 0}
+          style={{ opacity: fields.length === 0 ? 0.5 : 1, cursor: fields.length === 0 ? 'not-allowed' : 'pointer' }}
+        >
+          <EyeIcon size={14} /> Certificate Preview
         </button>
         <button className="btn btn-gold" onClick={save} disabled={saving}>
           {saving
@@ -455,6 +570,101 @@ export default function TemplateEditor() {
               </button>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Form Modal to Fill Sample Data */}
+      {showFormModal && (
+        <SampleDataFormModal 
+          fields={fields}
+          defaultData={getDefaultFormData()}
+          onSave={handleSaveSampleData}
+          onPreview={handlePreviewCertificate}
+          onClose={() => setShowFormModal(false)}
+        />
+      )}
+
+      {/* Certificate Preview Modal */}
+      {showCertModal && (
+        <CertPreviewModal
+          template={template}
+          sampleRow={sampleData}
+          onClose={() => setShowCertModal(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Sample Data Form Modal Component ───────────────────────────
+function SampleDataFormModal({ fields, defaultData, onSave, onPreview, onClose }) {
+  const [formData, setFormData] = useState(defaultData || {})
+
+  const handleChange = (key, value) => {
+    setFormData(prev => ({ ...prev, [key]: value }))
+  }
+
+  const handleSave = () => {
+    onSave(formData)
+  }
+
+  const handlePreview = () => {
+    onPreview(formData)
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 200, backdropFilter: 'blur(6px)',
+      }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: 'var(--surface)', borderRadius: 14,
+        border: '1px solid var(--border)', padding: 24,
+        maxWidth: '500px', width: '90%',
+        display: 'flex', flexDirection: 'column', gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Fill Sample Data</h2>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', color: 'var(--text3)',
+            cursor: 'pointer', padding: 4, fontSize: 20,
+          }}>
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '60vh', overflow: 'auto' }}>
+          {fields.map(f => (
+            <div key={f.id}>
+              <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text2)', marginBottom: 6, display: 'block' }}>
+                {f.variable.toUpperCase()}
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={formData[f.variable] || ''}
+                onChange={e => handleChange(f.variable, e.target.value)}
+                placeholder={`Enter ${f.variable}`}
+                style={{ fontSize: 13, width: '100%' }}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-secondary" onClick={handleSave}>
+            Save
+          </button>
+          <button className="btn btn-gold" onClick={handlePreview}>
+            Preview Certificate
+          </button>
         </div>
       </div>
     </div>
